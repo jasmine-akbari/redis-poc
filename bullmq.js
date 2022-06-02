@@ -1,5 +1,5 @@
 require('dotenv').config()
-const { Job, Worker, Queue } = require('bullmq');
+const { Job, Worker, Queue, QueueScheduler } = require('bullmq');
 
 var host = process.env.REDIS_SERVER;
 var key = process.env.REDIS_SERVER_PRIMARY_KEY;
@@ -59,18 +59,18 @@ const myQueue = new Queue('myqueue', {
     concurrency: 50,
 });
 
-const processor = async job => {
-    try {
-        console.log(job.data)
-    } catch(err) {
-        console.error(err)
+const myWorker = new Worker('myqueue', async (job) => {
+        try {
+            return await console.log(`${job.name} is being processed`);
+        } catch (err) {
+            console.log("Job failed with error: " + err);
+        }
+    },
+    {
+        connection: configuration,
+        concurrency: 50,
     }
-}
-
-const myWorker = new Worker('myworker', processor, {
-    connection: configuration,
-    concurrency: 50,
-});
+);
 
 // Start event listeners
 myQueue.on('waiting', job => console.info (
@@ -82,19 +82,42 @@ myQueue.on('active', job  => console.info(
 ));
 
 myWorker.on('completed', job => console.info(
-    `${job.id} has completed and returned ${job.returnvalue}`,
+    `Job: ${job.name} id: ${job.id} has completed, returned value: ${job.returnvalue}`,
 ));
+
+// myWorker.on('progress',  => console.info(
+//     `${job} has failed with reason ${err}`,
+// ));
 
 myWorker.on('failed', (job, err) => console.info(
     `${job} has failed with reason ${err}`,
 ));
+
+myWorker.on('error', err => {
+    console.error(`Worker process Failed with error: ${err}`);
+});
 // End event listeners
 
 (async () => {
-    await myQueue.add('myJobName', { foo: 'bar' });
-    await myQueue.add('myJobName', { qux: 'baz' });
-
-    await myQueue.process('myqueue', console.log(job.data))    
+    console.log(configuration)
+    await myQueue.add('myJobName', { foo: 'bar' },
+        {
+            attempts: 3,
+            backoff: {
+                type: 'exponential',
+                delay: 1000,
+            },
+        },
+    );
+    await myQueue.add('myJobName', { qux: 'baz' },
+        {
+            attempts: 3,
+            backoff: {
+                type: 'exponential',
+                delay: 1000,
+            },
+        },
+    );    
 
     process.exit(0)
 })();
